@@ -3,16 +3,15 @@ import pdfplumber
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.schema import HumanMessage, SystemMessage
 from dotenv import load_dotenv
 import os
-import re
 
 load_dotenv()
 
 # Read API key from Streamlit secrets (cloud) or env (local)
-_groq_default = st.secrets.get("GROQ_API_KEY", "") if hasattr(st, "secrets") else os.getenv("GROQ_API_KEY", "")
+_key_default = st.secrets.get("GOOGLE_API_KEY", "") if hasattr(st, "secrets") else os.getenv("GOOGLE_API_KEY", "")
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -26,7 +25,7 @@ CHUNK_SIZE = 500       # characters per chunk
 CHUNK_OVERLAP = 100    # overlap between chunks
 TOP_K = 4              # number of chunks to retrieve
 EMBED_MODEL = "all-MiniLM-L6-v2"
-LLM_MODEL = "llama-3.3-70b-versatile"
+LLM_MODEL = "gemini-1.5-flash"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -41,7 +40,6 @@ def extract_text(pdf_file) -> str:
 
 
 def chunk_text(text: str) -> list[str]:
-    """Split text into overlapping chunks."""
     chunks = []
     start = 0
     while start < len(text):
@@ -68,7 +66,7 @@ def retrieve(query: str, index, chunks: list[str], embedder: SentenceTransformer
     return [chunks[i] for i in indices[0] if i < len(chunks)]
 
 
-def answer(question: str, context_chunks: list[str], llm: ChatGroq) -> str:
+def answer(question: str, context_chunks: list[str], llm: ChatGoogleGenerativeAI) -> str:
     context = "\n\n---\n\n".join(context_chunks)
     messages = [
         SystemMessage(content=(
@@ -85,17 +83,16 @@ def answer(question: str, context_chunks: list[str], llm: ChatGroq) -> str:
 # ── UI ────────────────────────────────────────────────────────────────────────
 
 st.title("📄 PDF Chat")
-st.caption("Upload a PDF, then ask anything about it. Powered by RAG + Groq LLaMA 3.")
+st.caption("Upload a PDF, then ask anything about it. Powered by RAG + Gemini 1.5 Flash.")
 
-# Sidebar — API key + upload
 with st.sidebar:
     st.header("Setup")
 
     api_key = st.text_input(
-        "Groq API Key",
+        "Google AI API Key",
         type="password",
-        value=_groq_default,
-        help="Free at console.groq.com",
+        value=_key_default,
+        help="Free at aistudio.google.com",
     )
 
     st.divider()
@@ -111,20 +108,18 @@ with st.sidebar:
         "1. PDF is split into overlapping chunks\n"
         "2. Chunks are embedded with `all-MiniLM-L6-v2`\n"
         "3. Your question retrieves the top-4 relevant chunks via FAISS\n"
-        "4. LLaMA 3 answers using only those chunks"
+        "4. Gemini answers using only those chunks"
     )
-    st.markdown("[Get free Groq API key →](https://console.groq.com)")
+    st.markdown("[Get free Google AI key →](https://aistudio.google.com/apikey)")
 
-# Main area
 if not api_key:
-    st.info("Enter your Groq API key in the sidebar to get started.")
+    st.info("Enter your Google AI API key in the sidebar to get started.")
     st.stop()
 
 if not uploaded:
     st.info("Upload a PDF in the sidebar to begin.")
     st.stop()
 
-# Process PDF (cached per file)
 @st.cache_data(show_spinner="Parsing and indexing PDF...")
 def process_pdf(file_bytes: bytes, filename: str):
     import io
@@ -141,8 +136,7 @@ with st.sidebar:
     st.divider()
     st.caption(f"📊 {char_count:,} characters · {chunk_count} chunks indexed")
 
-# Chat interface
-llm = ChatGroq(api_key=api_key, model=LLM_MODEL, temperature=0.1)
+llm = ChatGoogleGenerativeAI(google_api_key=api_key, model=LLM_MODEL, temperature=0.1)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -150,17 +144,14 @@ if "messages" not in st.session_state:
 if "current_pdf" not in st.session_state:
     st.session_state.current_pdf = None
 
-# Reset chat when PDF changes
 if st.session_state.current_pdf != uploaded.name:
     st.session_state.messages = []
     st.session_state.current_pdf = uploaded.name
 
-# Render chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Input
 if question := st.chat_input(f"Ask anything about {uploaded.name}..."):
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
