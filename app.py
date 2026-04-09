@@ -11,6 +11,9 @@ import re
 
 load_dotenv()
 
+# Read API key from Streamlit secrets (cloud) or env (local)
+_groq_default = st.secrets.get("GROQ_API_KEY", "") if hasattr(st, "secrets") else os.getenv("GROQ_API_KEY", "")
+
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="PDF Chat — RAG Q&A",
@@ -91,7 +94,7 @@ with st.sidebar:
     api_key = st.text_input(
         "Groq API Key",
         type="password",
-        value=os.getenv("GROQ_API_KEY", ""),
+        value=_groq_default,
         help="Free at console.groq.com",
     )
 
