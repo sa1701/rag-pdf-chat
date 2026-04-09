@@ -3,15 +3,12 @@ import pdfplumber
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.chat_models import ChatOllama
 from langchain.schema import HumanMessage, SystemMessage
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
-
-# Read API key from Streamlit secrets (cloud) or env (local)
-_key_default = st.secrets.get("GOOGLE_API_KEY", "") if hasattr(st, "secrets") else os.getenv("GOOGLE_API_KEY", "")
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -25,7 +22,8 @@ CHUNK_SIZE = 500       # characters per chunk
 CHUNK_OVERLAP = 100    # overlap between chunks
 TOP_K = 4              # number of chunks to retrieve
 EMBED_MODEL = "all-MiniLM-L6-v2"
-LLM_MODEL = "gemini-1.5-flash"
+OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+LLM_MODEL = os.getenv("LLM_MODEL", "mistral")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -66,7 +64,7 @@ def retrieve(query: str, index, chunks: list[str], embedder: SentenceTransformer
     return [chunks[i] for i in indices[0] if i < len(chunks)]
 
 
-def answer(question: str, context_chunks: list[str], llm: ChatGoogleGenerativeAI) -> str:
+def answer(question: str, context_chunks: list[str], llm: ChatOllama) -> str:
     context = "\n\n---\n\n".join(context_chunks)
     messages = [
         SystemMessage(content=(
@@ -83,16 +81,16 @@ def answer(question: str, context_chunks: list[str], llm: ChatGoogleGenerativeAI
 # ── UI ────────────────────────────────────────────────────────────────────────
 
 st.title("📄 PDF Chat")
-st.caption("Upload a PDF, then ask anything about it. Powered by RAG + Gemini 1.5 Flash.")
+st.caption(f"Upload a PDF, then ask anything about it. Running locally via Ollama — no data leaves your machine.")
 
 with st.sidebar:
-    st.header("Setup")
+    st.header("Model")
 
-    api_key = st.text_input(
-        "Google AI API Key",
-        type="password",
-        value=_key_default,
-        help="Free at aistudio.google.com",
+    model = st.selectbox(
+        "Ollama model",
+        options=["mistral", "llama3.2", "llama3", "gemma2", "phi3"],
+        index=0,
+        help="Must be pulled locally: ollama pull mistral",
     )
 
     st.divider()
@@ -108,13 +106,9 @@ with st.sidebar:
         "1. PDF is split into overlapping chunks\n"
         "2. Chunks are embedded with `all-MiniLM-L6-v2`\n"
         "3. Your question retrieves the top-4 relevant chunks via FAISS\n"
-        "4. Gemini answers using only those chunks"
+        "4. Local LLM answers using only those chunks\n\n"
+        "**100% private — nothing leaves your machine.**"
     )
-    st.markdown("[Get free Google AI key →](https://aistudio.google.com/apikey)")
-
-if not api_key:
-    st.info("Enter your Google AI API key in the sidebar to get started.")
-    st.stop()
 
 if not uploaded:
     st.info("Upload a PDF in the sidebar to begin.")
@@ -136,7 +130,7 @@ with st.sidebar:
     st.divider()
     st.caption(f"📊 {char_count:,} characters · {chunk_count} chunks indexed")
 
-llm = ChatGoogleGenerativeAI(google_api_key=api_key, model=LLM_MODEL, temperature=0.1)
+llm = ChatOllama(base_url=OLLAMA_URL, model=model, temperature=0.1)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
